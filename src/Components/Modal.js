@@ -2,7 +2,8 @@ import React, {useState} from "react";
 import {Modal, Button, Card} from "react-bootstrap";
 import { saveAs } from 'file-saver';
 import JSZip from 'jszip';
-
+import { useRouteMatch} from 'react-router-dom';
+import { LinkContainer } from 'react-router-bootstrap'
 const proxyCorsUrl ="https://api.allorigins.win/get?url=";
 const proxyCorsDownloadUrl ="https://api.allorigins.win/raw?url=";
 
@@ -10,30 +11,17 @@ export default ({state, setState})=> {
 
   let [comments, setComments] = useState("");
   let book = state.book || {};
+  const match = useRouteMatch();
 
   const handleClose = () => {
-
     setComments([]);
     setState({...state, showModal:false});
-  
-  }
-
-  const getSequence = (id)=> {
-
-      setState({...state, url: "/opds/sequencebooks/"+id, showModal:false});
-
   };
-
-  const getAuthor = (id)=> {
-    setState({...state, url:"/opds/author/"+id+"/time", showModal:false});
-  };
-
 
 
 
   const getComments = (id)=> {
-    //fetch('http://f0565502.xsph.ru/flib_get_comments.php?id='+book.id)
-    fetch(proxyCorsUrl+encodeURIComponent('http://flibusta.is/b/'+book.id))
+    fetch(proxyCorsUrl+encodeURIComponent('http://flibusta.is/b/'+book.bid))
       .then(response=>response.json())
       .then(response => new Promise((resolve, reject)=> {
         let commentsReg = Array.from(response.contents.matchAll(/<span class="container_.*?>(.*?)<\/span>/gus));
@@ -44,13 +32,19 @@ export default ({state, setState})=> {
 
   };
 
-  function str2bytes (str) {
-    var bytes = new Uint8Array(str.length);
-    for (var i=0; i<str.length; i++) {
-      bytes[i] = str.charCodeAt(i);
-    }
-    return bytes;
-  }
+  const markAsFavorite = async (id)=> {
+   /* const mongodb = realm.currentUser.mongoClient("mongodb-atlas");
+    const users = mongodb.db("flibusta").collection("User");
+    await collection.updateOne(
+      { owmerId: realm.currentUser.id }, // Query for the user object of the logged in user
+      { $set: { favoriteColor: "purple" }}, // Set the logged in user's favorite color to purple
+      {upsert: true}
+    );
+// Refresh the user's local customData property
+    await realm.currentUser.refreshCustomData();
+    console.log(realm.currentUser.customData);*/
+
+  };
 
   const downloadBook = (e, el)=>{
     e.preventDefault();
@@ -85,17 +79,25 @@ export default ({state, setState})=> {
 
   };
 
-  //console.log(book.downloads, book);
+  console.log( book);
+
+  const url = `/lib/${match.params.libName}`;
 
   return (
     <Modal show={state.showModal} onHide={handleClose}>
       <Modal.Header closeButton>
         <Modal.Title>
           {book.author && book.author.map((author,i)=>
-            <Button onClick={getAuthor.bind(this, author.id)} variant="link" key={i} >{author.name}</Button>)}
+            <LinkContainer  key={i} to={`${url}/author/${author.id}`}>
+              <Button  variant="link" >{author.name}</Button>
+            </LinkContainer>
+              )}
           <h5 className="book-name">{book.title}</h5>
           {book.sequencesId && book.sequencesId.map((id,i)=>
-            <Button onClick={getSequence.bind(this, id)} variant="link" key={i} >{book.sequencesTitle[i]}</Button>)}
+            <LinkContainer  key={i} to={`${url}/sequence/${id}`}>
+              <Button variant="link" >{book.sequencesTitle[i]}</Button>
+            </LinkContainer>
+          )}
         </Modal.Title>
       </Modal.Header>
       <Modal.Body>
@@ -109,6 +111,7 @@ export default ({state, setState})=> {
           Закрыть
         </Button>
         <Button variant="primary" onClick={getComments.bind(this,book.id)}>Получить комментарии</Button>
+        <Button variant="secondary" onClick={markAsFavorite.bind(this,book.id)}>Получить комментарии</Button>
       </Modal.Footer>
     </Modal>
   );

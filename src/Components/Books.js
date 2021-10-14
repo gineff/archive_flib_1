@@ -1,109 +1,177 @@
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useState, useRef} from 'react';
 import {Container, Row} from "react-bootstrap";
+import { useRealmApp } from "../RealmApp";
 import Book from "./Book";
-import Preloader from "./Preloader";
-
-import { run as runHolder } from 'holderjs/holder';
 import Paggination from "./Paggination";
-const parseString = require('xml2js').parseString;
-const proxyCorsUrl ="https://api.allorigins.win/get?url=";
+import Modal from "./Modal";
 
-export default ({ state, setState})=> {
+import Preloader from "./Preloader";
+import genres from '../data/genres'
+import libraries from "../data/libraries";
+import flibustaParser from "../service/xmlParserFlibusta";
 
+const queryString = require('query-string');
+
+export default ({ match, location, state, setState, realm})=> {
+  const app = useRealmApp();
   const [books, setBooks] = useState([]);
+  const [pages, setPages] = useState({page:1,total:1});
+  const [partyIndex, setPartyIndex] = useState({});
+ // const [app, setApp] = useState(opds.setApp(realm));
+//  const initialQuery = {lib: libraries.filter(el=>el.name === match.params.libName)[0], filterBy: match.params[0], id: match.params.id, page: 1});
+  const getLibraryByName = (name) =>  libraries.filter(el=>el.name === name)[0];
+  const [query, setQuery] = useState({lib: getLibraryByName( match.params.libName), filterBy: match.params[0], id: match.params.id, page: 1});
+  const refLocation = useRef(null);
+  const proxyCorsUrl ="https://api.allorigins.win/raw?url=";
 
-  const node = "$"; //@attribute
-  const server = "/"; //http://f0565502.xsph.ru //remove proxy from package.json
+  const mongodb = app?.currentUser?.mongoClient("mongodb-atlas");
+  const collection = mongodb?.db("flibusta")?.collection("Books");
+
+  const getGenres = ()=> {
+    const genre = genres.filter(el=>el.title === query.id)[0];
+    return genre.entries.map((el)=>el.title);
+  };
+
+  const getPage  = async ()=>{
+    if(query.filterBy === 'genre'){
+      const pipeline = [
+     //   {"$unwind":"$genre"},
+        {"$match": {"lid": query.lib.id, "genre" : {"$in": getGenres()}}},
+        //{"$group":{_id:"$id"}},
+        {"$sort":{"_id":-1}},
+        {"$skip": (pages.page-1)*20},
+        {"$limit": 20}
+      ];
+      const result = await collection.aggregate(pipeline);
+
+
+      return  result;
+    }else{
+      let _query = {lid: query.lib.id};
+      if(pages.page >1) _query.bid = {$lt: partyIndex[(pages.page-1)]};
+      const result = await collection.find(_query,{sort:{"_id":-1}, limit:20});
+      if(result.length) setPartyIndex({...partyIndex, [pages.page]:result[result.length-1].bid});
+      return  result;
+    }
+
+  };
+
+  const getPageFromUrl  = async ()=>{
+    let url;
+    if(query.filterBy === "author"){
+      url = "/opds/author/" + query.id + "/time"+"/"+(pages.page-1);
+    }else if(query.filterBy === "sequence"){
+      url =  "/opds/sequencebooks/"+query.id+"/"+(pages.page-1);
+    }else if(query.filterBy === "genre") {
+      const genre = genres.filter(genre=>genre.title === query.id)[0];
+      url =  "/opds/new/" + (pages.page - 1) + "/newgenres/" + query.id;
+    }else if(query.filterBy === "search") {
+      url = '/opds/opensearch?searchType=books&searchTerm=' + query.id;
+    }else{
+      url =  "/opds/new/" + (pages.page - 1) + "/new/" ;
+    }
+
+    const  result = await fetch(proxyCorsUrl+encodeURIComponent(query.lib.url+url))
+      .then(res=>res.text()).then(res=>flibustaParser(res));
+    return  result;
+  };
+
+  const getListPage = async ()=> {
+    const searchUrl = 'http://flibusta.is/opds/opensearch?searchType=books&searchTerm=';
+
+
+    const text = await fetch(proxyCorsUrl+encodeURIComponent('http://flibusta.is/stat/'+query.id)).then(res=>res.text())
+    const links = Array.from(text.matchAll(/<a href="\/b\/(\d+)">(.*?)<\/a>/gus))?.slice(0,5)?.map(el=>({id:el[1],title:el[2]}));
+    const _books = [];
+    for(let link of links) {
+      const str = link.title.replaceAll(/\[.*?\]/g,"").trim();
+      const searchBooks =  await fetch(proxyCorsUrl+encodeURIComponent(searchUrl+str))
+        .then(res=>res.text()).then(res=>flibustaParser(res))
+      const book = searchBooks?.filter(el=>el.bid == link.id)[0];
+      console.log(book);
+      if(book) books.push(book)
+
+    }
+    return  books;
+  };
+  const searchTypes = ["books", "authors"];
+
+  const search = async (str)=> {
+    const results = [], books = [];
+    for (let searchType of searchTypes) {
+      const searchUrl = `/opds/search?searchType=${searchType}&searchTerm=${str}`;
+      const result = await fetch(proxyCorsUrl+encodeURIComponent(query.lib.url+searchUrl))
+        .then(res=>res.text()).then(res=>flibustaParser(res));
+      results.push(result);
+    }
+    return  await  Promise.all(results).then(res=>res.reduce((ar,el)=>ar.concat(el),[]));
+  };
+
+  useEffect(()=> {
+    if(refLocation.current){
+      setQuery({...query, page: pages.page});
+    }
+  },[pages]);
+
+  let promise;
+  useEffect(()=> {
+
+    //if auth
+    //else
+    setState({...state, fetching: true, loading: false});
+    switch (query.filterBy) {
+      case "author":
+        promise = getPageFromUrl(); break;
+      case 'sequence':
+        promise = getPageFromUrl(); break;
+      case 'search':
+        promise = search(query.id); break;
+      case 'list':
+        promise = getListPage(); break;
+      default:
+        promise = app.currentUser? getPage() : getPageFromUrl();
+    }
+    console.log(promise);
+
+   //     const promise = (query.filterBy === "author"|| query.filterBy === "sequence") ? getPageFromUrl() : getPage();
+    promise.then(books=> {
+      books.forEach(el=>el.lib = query.lib);
+      setBooks(books);
+      setState({...state, fetching: false, loading: false});
+    });
+  },[query]);
 
 
   useEffect(()=>{
-    getBooksGroup();
-  },[state.url]);
-
-  useEffect(()=>{
-    setTimeout(()=>{window.holder();},500)
-
-   // runHolder('image-class-name');
-  },[state.books]);
-
-
-  const getBookId = (book)=> {
-    let link = book.link[2][node].href;
-    let arr = link.split('/');
-    return  arr[3];
-  };
-
-  const getSequences = (book) => {
-    let res =  Array.from( book.content[0]["_"].matchAll(/Серия: (.*?)<br\/>/g));
-    return res.map(el=>el[1])
-  };
-
-  const parseBook = (book) => {
-
-
-    let _book = {sequencesId: [], downloads:[], content: book.content[0]["_"], title: book.title};
-    //parse author
-    if (!Array.isArray(book.author)) book.author = [book.author];
-    _book.author = book.author && book.author.map((el) => {
-      if (!el) return  false;
-      return {id: el.uri? el.uri[0].split('/')[2] : null, name: el.name[0]}
-    });
-    //get sequence from title
-    //parse links for image, id, sequence id, download links
-    book.link.forEach((el, i) => {
-      let e = el[node];
-      if(e.type === "image/jpeg" && !book.image) {_book.image = "http://flibusta.is"+e.href; _book.id = e.href.split("/")[3]}
-      else if (e.href.slice(0, 19) === "/opds/sequencebooks")
-        _book.sequencesId.push( e.href.split("/")[3]);
-      else if(e.rel === "http://opds-spec.org/acquisition/open-access") _book.downloads.push({href:e.href,type: e.type})
-
-    });
-
-    //_book.image = _book.image? _book.image : "holder.js/160px250";
-    _book.sequencesTitle = getSequences(book);
-
-    return _book;
-  };
-
-
-  const getBooks = (url)=>{
-    //return fetch('/flibusta',{ mode: 'no-cors', method:"post", body:JSON.stringify({path:url})})
-    setState({...state, fetching: true});
-    return fetch(proxyCorsUrl+encodeURIComponent('http://flibusta.is'+state.url))
-      .then(res=>res.json()).then(response => new Promise((resolve, reject)=> {
-        parseString(response.contents, (err, res)=> {resolve(res.feed.entry)})
-      }))
-
-  };
-
-  const getBooksGroup = ()=> {
-    getBooks(state.url).then((books,err)=>{
-      if(books) {
-        setBooks(books);
-        setState({...state, fetching: false, loading: false})
+    if(!refLocation.current){
+      refLocation.current = location;
+    }else{
+      if(refLocation.current !== location){
+        setState({...state, fetching: true, showModal: false});
+        setPages({page:1, total:1});
+        setQuery({...query, lib: getLibraryByName( match.params.libName), filterBy: match.params[0], id: match.params.id})
       }
-    })
-  };
+    }
+  },[location])
+
   if(state.loading) {
     return  <div>is loading...</div>;
-
   }
-
   return (
     <div className="books">
     <Container>
       <Row>
-        <Paggination state={state} setState={setState}> </Paggination>
+        <Paggination pages={pages} setPages={setPages}> </Paggination>
         {
           books.map((book, index)=>{
-            let _book = parseBook(book);
-
-            return <Book key={index} book={_book} state={state} setState={setState}></Book>})
+            return <Book key={index} book={book} state={state} setState={setState}></Book>})
         }
       </Row>
-      <Preloader state={state} setState={setState}/>
+
+      <Paggination pages={pages} setPages={setPages}> </Paggination>
     </Container>
-      <Paggination state={state} setState={setState}> </Paggination>
+      <Modal state={state} setState={setState}> </Modal>
+      <Preloader state={state} setState={setState}/>
   </div>
 )
 }

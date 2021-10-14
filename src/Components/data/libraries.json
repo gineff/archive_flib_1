@@ -1,4 +1,4 @@
 [
-  {"name": "Flibusta", "url": "http://flibusta.is"},
-  {"name": "Coollib", "url": "http://coollib.net"}
+  {"id":1, "name": "Flibusta", "url": "http://flibusta.is"},
+  {"id":2, "name": "Coollib", "url": "http://coollib.net"}
 ]

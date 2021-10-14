@@ -1,21 +1,10 @@
-import React, {useEffect, useState} from "react";
+import React from "react";
 import {Container, Pagination, Row} from "react-bootstrap";
 
-export default ({state, setState})=> {
+export default ({pages, setPages})=> {
 
-  const [pages, setPages] = useState({page:1,total:1});
-
-  const generateUrl = (page)=> {
-    let genre = state.genre;
-    let url = genre.id === 0? "/opds/new/"+(page.page-1)+"/new" : "/opds/new/"+(page.page-1)+"/newgenres/"+genre.id;
-    setState({...state, url})
-  };
 
   let items = [];
-
-  useEffect(()=>{
-   generateUrl(pages)
-  },[pages]);
 
   for (let number = 1; number <= pages.total; number++) {
     items.push(

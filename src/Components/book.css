@@ -16,3 +16,10 @@
     height: 132px;
     overflow: hidden;
 }
+
+.bookDate{
+    position: absolute;
+    top: 67%;
+    right: 0;
+    font-size: 8px;
+}
